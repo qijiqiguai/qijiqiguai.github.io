@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/><meta name="exporter-version" content="Evernote Mac 6.11.1 (455061)"/><meta name="altitude" content="25.2485523223877"/><meta name="author" content="W"/><meta name="created" content="2016-05-13 03:08:24 +0000"/><meta name="latitude" content="30.28449644622723"/><meta name="longitude" content="120.1198373773365"/><meta name="source" content="desktop.mac"/><meta name="updated" content="2016-05-15 14:26:58 +0000"/><title>善用 ApacheAB 和 VisualVM, 做开发阶段代码性能调优</title></head><body>
+<div>     在开发阶段, 开发人员往往很难意识到代码对性能的影响, 很多时候需要最终的压力测试来逐一排除. 但是作为创业公司, 往往没有专门的压力测试流程, 那么核心开发人员在核心业务逻辑的开发阶段就需要对代码造成的性能问题作出预判和解决, 这里提供开发本地可操作的, 基于 ApacheAB 和 VisualVM 的性能调优方案.</div>
+<div><br/></div>
+<div>     通常 Linux 系统都是自带 Apache 的, 因此也自带了 AB, 只要是 JDK 环境, 都是自带 VisualVM 的, 所以两者的获取成本极低, 甚至不需要专门准备. 我的机器上路径如下, 各个环境可能不同. </div>
+<table style="-evernote-table:true;border-collapse:collapse;margin-left:0px;table-layout:fixed;width:100%;">
+<tr>
+<td style="border: 1px solid rgb(219, 219, 219); padding: 10px; margin: 0px;width:20.55378061767838%;">
+<div>VisualVM</div>
+</td>
+<td style="border: 1px solid rgb(219, 219, 219); padding: 10px; margin: 0px;width:79.33972310969116%;">
+<div>/Library/Java/JavaVirtualMachines/jdk1.8.0_31.jdk/Contents/Home/bin/jvisualvm</div>
+</td>
+</tr>
+<tr>
+<td style="border-style:solid;border-width:1px;border-color:rgb(219,219,219);padding:10px;margin:0px;width:50%;">
+<div>ApacheAB</div>
+</td>
+<td style="border-style:solid;border-width:1px;border-color:rgb(219,219,219);padding:10px;margin:0px;width:50%;">
+<div>/Applications/MAMP/bin/apache2/bin/ab</div>
+</td>
+</tr>
+</table>
+<div>     </div>
+<div><br/></div>
+<div><span style="font-size: 18px;">1: ApacheAB 基本使用</span></div>
+<div>     ApacheAB是随着 Apache 服务器一起诞生的, 极为稳定成熟, 但是功能也相对较弱, 比如只支持 HTTP 调用, 没有预热过程, 不提供流量增长和变化侧率. 然而, 作为一个命令行工具, 它极其简单易用.</div>
+<div>     这里先给出典型的使用方式: </div>
+<table style="-evernote-table:true;border-collapse:collapse;margin-left:0px;table-layout:fixed;width:100%;">
+<tr>
+<td style="border: 1px solid rgb(219, 219, 219); padding: 10px; margin: 0px;width:16.826411075612356%;">
+<div>Get请求</div>
+</td>
+<td style="border: 1px solid rgb(219, 219, 219); padding: 10px; margin: 0px;width:83.06709265175719%;">
+<div>ab -n 100 -c 2 http://127.0.0.1:8080/api/v1/home/city/179</div>
+</td>
+</tr>
+<tr>
+<td style="border-style:solid;border-width:1px;border-color:rgb(219,219,219);padding:10px;margin:0px;width:50%;">
+<div> Post 请求</div>
+</td>
+<td style="border-style:solid;border-width:1px;border-color:rgb(219,219,219);padding:10px;margin:0px;width:50%;">
+<div>ab -n 100 -c 2 -p /var/post.file -T ‘application/json’ http://127.0.0.1:8080/api/v1/pub/search</div>
+</td>
+</tr>
+</table>
+<div>其中 -n 表示总共发出多少个请求, -c 表示总共多少并发用户, -p 表示 post请求的参数所在的文件位置, 设置 -p 的时候还需要设置 -T, 用于指定 Content-type.</div>
+<div>     </div>
+<div>     调用完成之后, AB 还会给出一个调用报告:</div>
+<table style="-evernote-table:true;border-collapse:collapse;margin-left:0px;table-layout:fixed;width:100%;">
+<tr>
+<td style="border: 1px solid rgb(219, 219, 219); padding: 10px; margin: 0px;width:45.260915867944625%;">
+<div>&gt; ab -n 100 -c 2 http://127.0.0.1:8080/api/v1/home/city/179</div>
+<div>This is ApacheBench, Version 2.3 &lt;$Revision: 1706008 $&gt;</div>
+<div>Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/</div>
+<div>Licensed to The Apache Software Foundation, http://www.apache.org/</div>
+<div><br/></div>
+<div>Benchmarking 127.0.0.1 (be patient).....done</div>
+<div>Completed 100 requests</div>
+<div><br/></div>
+<div>Server Software:        Apache-Coyote/1.1</div>
+<div>Server Hostname:      127.0.0.1</div>
+<div>Server Port:            8080</div>
+<div><br/></div>
+<div>Document Path:          /api/v1/home/city/179</div>
+<div>Document Length:        11419 bytes</div>
+<div><br/></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Concurrency Level:      2</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Time taken for tests:   1.894 seconds</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Complete requests:      100</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Failed requests:        0</span></div>
+<div>Total transferred:      1178500 bytes</div>
+<div>HTML transferred:       1141900 bytes</div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Requests per second:    52.79 [#/sec] (mean)</span></div>
+<div>Time per request:       37.888 [ms] (mean)</div>
+<div>Time per request:       18.944 [ms] (mean, across all concurrent requests)</div>
+<div>Transfer rate:          607.52 [Kbytes/sec] received</div>
+<div><br/></div>
+<div>Connection Times (ms)</div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">                      min  mean[+/-sd]   median   max</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Connect:         0      0       0.3          0           3</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Processing:    25     37    12.9        34          100 </span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Waiting:          24     35    10.9        33          93</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Total:              25      38    12.9       35         100</span></div>
+<div><br/></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Percentage of the requests served within a certain time (ms)</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">  50%     35</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">  66%     38</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">  75%     40</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">  80%     43</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">  90%     50</span></div>
+<div>  95%     65</div>
+<div>  98%     95</div>
+<div>  99%    100</div>
+<div> 100%    100 (longest request)</div>
+</td>
+<td style="border: 1px solid rgb(219, 219, 219); padding: 10px; margin: 0px;width:54.632587859424916%;">
+<div>其中有一些关键指标值得解读:</div>
+<div><br/></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Concurrency Level:   2 即有多少个并发</span></div>
+<div>    AB 通过多线程来请求配置的 URL, 它们会同一时间发送请求, 然后完成一个之后继续下一个, 直到 -n 配置的总请求数量消耗完为止. </div>
+<div>    并发数量, 并不等于服务端的实际处理能力, 因为在这些线程刚起的瞬间, 多少个用户就有多少个并发, 但是由于 Server 处理能力有限, 这些请求会阻塞在 Server 端排队处理, 这就导致了并发线程不是无限制不停的发送请求的, 而发送的时候也不一定都是同步的.</div>
+<div>     并发用户越多, 那么对系统造成的压力越大, 因为阻塞在 Server 端的请求会越多, 由于线程轮转, 导致每个线程抢到 CPU 的概率降低, 从而响应时间增加, 如过无限增加, 甚至会出现系统无法给出返回的情况, 造成吞吐量为0. 这种情况其实最能提现单线程的优势, 因为没有 CPU 轮转, 所以处理效率更高. </div>
+<div>     当然系统级别有优化措施, 即线程池, 一次性调度进入 CPU 处理的总数量是有限的, 多出来的就一直等在队列中.  这样就造成了系统的处理能力一直是固定的, 但是单个请求从进入队列到最终处理完的相应时间变长. </div>
+<div>     理解了这一点, 就能理解并发和 QPS 的关系.</div>
+<div><br/></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Requests per second:    52.79 [#/sec] (mean), 即平均 QPS(Request Per Second) 为52.79</span></div>
+<div>    上面也分析过, Request 到了 Server 端之后会排队处理, 而单位时间处理的能力是有限的, 总共的请求数量以及从第一个请求发出到最后一个请求结束的总时间, 进行评价, 就得到每秒的系统处理能力, 即吞吐量.</div>
+<div>     吞吐量跟系统处理能力, 一次抢占 CPU 的线程池大小都是相关的.</div>
+<div><br/></div>
+<div><br/></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">Percentage of the requests served within a certain time (ms) 响应时间的百分位数</span></div>
+<div>    由于系统的吞吐能力固定, 所以并发用户越多, 那么单个请求的响应时间越长, 用百分位数来描述请求响应时间比较合适. 常见的统计指标中<span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">median中位数, 即第50个百分位数.</span></div>
+<div>     <span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">90%     50 指的是90%的请求在50毫秒内返回. </span></div>
+<div>    如果我们定义用户体验指标, 那么就可以用百分位数和响应时间来确认, 如 90%的用户请求在1秒以内完成. 定义了指标之后, 就可以测出在这个指标下系统的并发能力. 通过不断调整 -n 参数并查看结果, 找到更指标最接近的那个值, 就是系统在指标下的并发能力.</div>
+</td>
+</tr>
+</table>
+<div><br/></div>
+<div><br/></div>
+<div>2: VisualVM 基本使用</div>
+<div>     VisualVM 是基于 JMX 来对 JVM 进行数据采集的, 所以开发的时候需要<span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">将项目启动为 Debug 模式这样 JMX 端口才会被开启</span>, 否则VisualVM并不能找到这个实例. </div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/DA9F2994-8DCF-4C52-83A5-736910D9EADC.png" height="584" width="944"/></div>
+<div>VisualVM 的基本功能有: JVM概览, 监视, 线程, 抽样器, Profiler. 通过安装插件可以扩展部分功能, 如 MBeans 和 VisualGC.</div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/40F18392-55F6-4757-AF29-6AFF9CFD7616.png" height="52" width="1564"/></div>
+<div><br/></div>
+<div>双击一个实例之后, 点击打开使用界面</div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/D94B7746-4E13-47CB-A886-379C547A126F.png" height="850" width="2010"/></div>
+<div><br/></div>
+<div><br/></div>
+<div>主要指标: CPU, 内存使用, 类总数, 线程数等等. </div>
+<div>其中如果做 JVM 调优, 那么可以观察堆的GC 状况.</div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/8C9AB1D0-ED55-4BBE-8050-604E9F7B1080.png" height="1488" width="2726"/></div>
+<div><br/></div>
+<div>线程, 用于查看所有的线程状况, 可以非常方便看到多线程之间的运行状况. 这里甚至可以查看线程很锁的关系, 方便进行死锁检测. </div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/66B6569E-3412-4EF2-9433-4B97ECB3084F.png" height="1600" width="2728"/></div>
+<div><br/></div>
+<div>抽象器可以对内存和 CPU 的使用状况进行实时监测, 而且还能创建实时 Dump文件. 如果对代码进行调优, 这个部分是核心功能. </div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/36187839-7F0E-46C2-A4A1-987CF73A2061.png" height="1592" width="2710"/></div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/AA17FBCB-9AD9-472A-82BE-F6D1BCD22607.png" height="644" width="2722"/></div>
+<div><br/></div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/027BF4ED-0712-4A61-B9AC-F2CDD2554B02.png" height="1620" width="2702"/></div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/0A2807C5-8741-412F-B80C-085CD9874ADB.png" height="778" width="2726"/></div>
+<div><br/></div>
+<div><br/></div>
+<div><br/></div>
+<div><span style="font-size: 18px;">3: 调优案例</span></div>
+<div>/Applications/MAMP/bin/apache2/bin/ab -n 5000 -c 200 -T 'application/json' -p /tmp/ab.post http://127.0.0.1:8080/api/v1/teacher/pub/search</div>
+<div>/tmp/ab.post 为 POST 所发出的数据, 内容为:</div>
+<div>{</div>
+<div>  "lon": 30.288,</div>
+<div>  "lat": 120.131,</div>
+<div>  "lessonId": 1,</div>
+<div>  "cityCode": 179</div>
+<div>}</div>
+<div>本接口是 SKWY 项目中基于 LBS 查找老师列表的核心接口, 由于是基于 LBS 的, 所以很难做缓存(当然不是不能走, 如果是地理方格, 是可以做到缓存的, 但是这个跟本部分无关)</div>
+<div><br/></div>
+<div>核心代码为: </div>
+<table style="-evernote-table:true;border-collapse:collapse;margin-left:0px;table-layout:fixed;width:91.81227626943004%;">
+<tr>
+<td style="border: 1px solid rgb(219, 219, 219); padding: 10px; margin: 0px;width:70.41036717062636%;">
+<div>SearchResponse response = searchClient.getClient().prepareSearch(indices).setTypes(teacherType)</div>
+<div>        .addSort(searchSort)</div>
+<div>        .setQuery(bqb).setPostFilter(filterQb)</div>
+<div>        .setFrom(pageable.getOffset())</div>
+<div>        .setSize(pageable.getPageSize()).execute().actionGet();</div>
+<div>long total = response.getHits().getTotalHits();</div>
+<div>List&lt;TeacherSummary&gt; beanList = new ArrayList&lt;&gt;();</div>
+<div>if (total &gt; 0) {</div>
+<div>    for (SearchHit hit : response.getHits().getHits()) {</div>
+<div>        //Handle the hit...</div>
+<div>        <span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">TeacherSummary bean = new TeacherSummary();</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">        org.apache.commons.beanutils.BeanUtils.copyProperties(bean, hit.getSource());</span></div>
+<div>        if (form.getSortType() == TeacherSearchForm.SortType.DISTANCE) {</div>
+<div>            double distance = this.getDistance(hit);</div>
+<div>            bean.setDistance(distance);</div>
+<div>        } else {</div>
+<div>            double[] location = bean.getLocation();</div>
+<div>            if (location == null || location.length == 0) {</div>
+<div>                location = new double[]{city.getLongitude(), city.getLatitude()};</div>
+<div>            }</div>
+<div>            //手动计算</div>
+<div>            double distance = Distance.show(form.getLon(), form.getLat(), location[0], location[1]);</div>
+<div>            bean.setDistance(distance);</div>
+<div>        }</div>
+<div>        beanList.add(bean);</div>
+<div>    }</div>
+<div>}</div>
+<div>Page&lt;TeacherSummary&gt; page = new PageImpl&lt;TeacherSummary&gt;(beanList, pageable, total);</div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">form.setCityId(city.getId());</span></div>
+<div>form.setPage(pageable.getPageNumber());</div>
+<div>form.setPageSize(pageable.getPageSize());</div>
+<div>form.setSearchSource(SearchLog.SearchSource.TEACHER);</div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">addSearchLog(form);</span></div>
+</td>
+<td style="border: 1px solid rgb(219, 219, 219); padding: 10px; margin: 0px;width:25.377969762419006%;">
+<div>这段代码的核心意思就是, 通过 ES 找到结果, 然后 Mapping 成 ResultObject, 之后返回给前端.</div>
+<div><br/></div>
+<div><br/></div>
+</td>
+</tr>
+</table>
+<div><br/></div>
+<div><br/></div>
+<div>发起 AB 请求之后, 观察 VisualVM 的测试结果:</div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/F696D1C9-7F6A-4CB0-8CBD-5415D44B517C.png" height="1542" width="2844"/></div>
+<div>上图显示, 进行了两次测试, 两次测试中 CPU 使用率飙升, 同时内存进行了大量和频繁的 GC, 线程数稳定上升. </div>
+<div>可以通过优化 JVM 的方式来尽量减少 GC 的次数. 但是 JVM 调优不是本文的重点.</div>
+<div><br/></div>
+<div>通过抽样器</div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/C302C872-DC4C-40E6-9963-13B909C15980.png" height="638" width="2014"/></div>
+<div>发现占用 CPU 最大的竟然是打 Log 的过程, 那么先将 DebugLog 去除掉. 不让日志的过程影响测试. </div>
+<div><br/></div>
+<div><br/></div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/967E49EB-3D21-4616-9491-D064E3BD8F5C.png" height="1032" width="2810"/></div>
+<div><br/></div>
+<div><img src="%E5%96%84%E7%94%A8%20ApacheAB%20%E5%92%8C%20VisualVM,%20%E5%81%9A%E5%BC%80%E5%8F%91%E9%98%B6%E6%AE%B5%E4%BB%A3%E7%A0%81%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98.resources/94756159-53DC-41D7-85FE-F2238F6A2684.png" height="986" width="2834"/></div>
+<div><br/></div>
+<div>通过分析, 可以看到, BeanUtil这段代码调用过程中, 出现了大量的反射和 JDBC 操作, 回头观察代码, </div>
+<table style="-evernote-table:true;border-collapse:collapse;width:100%;table-layout:fixed;margin-left:0px;">
+<tr>
+<td style="border-style:solid;border-width:1px;border-color:rgb(219,219,219);padding:10px;margin:0px;width:100%;">
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">org.apache.commons.beanutils.BeanUtils.copyProperties(bean, hit.getSource());</span></div>
+</td>
+</tr>
+<tr>
+<td style="border-style:solid;border-width:1px;border-color:rgb(219,219,219);padding:10px;margin:0px;width:100%;">
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">form.setCityId(city.getId());</span></div>
+</td>
+</tr>
+</table>
+<div>第一段, 实际上是将 ElasticSearch 中的结果映射成 Object, 然后再返回给前端. 实际上,  <span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">hit.getSource() 得到的是一个 Map&lt;String, Object&gt;, 直接转化成 JSON 传给前端, 效果是一样的, 那么完全可以省去这个过程. 即原来的过程是 Map&lt;String, Object&gt; -&gt; </span><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">TeacherSummary -&gt; JSON, 直接变成 Map&lt;String, Object&gt; -&gt; JSON, 这个过程 Spring 同样可以自动完成. 省去了一个反射生成 TeacherSummary 的过程直接得到结果. </span></div>
+<div>第二段, 从 JPA/Hibernate 的基本原理可以知道, City 对象本身只是一个代理, 只有去具体拿值的时候才会去 DB 取出原始数据. 观察 SQL 输出, 发现的确每次返回结果都有一条 SQL 打印出来, 可知这个过程完全不必要重复进行, 直接缓存即可. </div>
+<table style="-evernote-table:true;border-collapse:collapse;width:100%;table-layout:fixed;margin-left:0px;">
+<tr>
+<td style="border-style:solid;border-width:1px;border-color:rgb(219,219,219);padding:10px;margin:0px;width:100%;">
+<div>@Cacheable(value= Constants.SPRING_DEFAULT_CACHE,key="'skwy:city_by_code:'+#code")</div>
+<div>public City findByCode(String code) {</div>
+<div>    return cityRepository.findByCode(code);</div>
+<div>}</div>
+</td>
+</tr>
+</table>
+<div><br/></div>
+<div>返回来看我们的优化过程, </div>
+<div>首先, 去除了对控制台打 Log 进行的影响, 然后分析抽样器的 CPU 和内存占用情况, 之后结合代码分析, 得出两点可以优化的地方, 然后进行改进. </div>
+<div><br/></div>
+<div><span style="font-size: 18px;">附录: ApacheAB 命令详解</span></div>
+<div>
+<div>Usage: ab [options] [http[s]://]hostname[:port]/path</div>
+<div>Options are:</div>
+<div>    -n requests     Number of requests to perform</div>
+<div>    -c concurrency  Number of multiple requests to make at a time</div>
+<div>    -t timelimit    Seconds to max. to spend on benchmarking  This implies -n 50000</div>
+<div>    -s timeout      Seconds to max. wait for each response  Default is 30 seconds</div>
+<div>    -b windowsize   Size of TCP send/receive buffer, in bytes</div>
+<div>    -B address      Address to bind to when making outgoing connections</div>
+<div>    -p postfile     File containing data to POST. Remember also to set -T</div>
+<div>    -u putfile      File containing data to PUT. Remember also to set -T</div>
+<div>     -i              Use HEAD instead of GET</div>
+<div>    -T content-type Content-type header to use for POST/PUT data, eg. 'application/x-www-form-urlencoded’  Default is 'text/plain'</div>
+<div>    -v verbosity    How much troubleshooting info to print</div>
+<div>    -w              Print out results in HTML tables</div>
+<div>    -x attributes   String to insert as table attributes</div>
+<div>    -y attributes   String to insert as tr attributes</div>
+<div>    -z attributes   String to insert as td or th attributes</div>
+<div>    -C attribute    Add cookie, eg. 'Apache=1234'. (repeatable)</div>
+<div>    -H attribute    Add Arbitrary header line, eg. 'Accept-Encoding: gzip’ Inserted after all normal header lines. (repeatable)</div>
+<div>    -A attribute    Add Basic WWW Authentication, the attributes are a colon separated username and password.</div>
+<div>    -P attribute    Add Basic Proxy Authentication, the attributes are a colon separated username and password.</div>
+<div>    -X proxy:port   Proxyserver and port number to use</div>
+<div>    -V              Print version number and exit</div>
+<div>    -k              Use HTTP KeepAlive feature</div>
+<div>    -d              Do not show percentiles served table.</div>
+<div>    -S              Do not show confidence estimators and warnings.</div>
+<div>    -q              Do not show progress when doing more than 150 requests</div>
+<div>    -l              Accept variable document length (use this for dynamic pages)</div>
+<div>    -g filename     Output collected data to gnuplot format file.</div>
+<div>    -e filename     Output CSV file with percentages served</div>
+<div>    -r              Don't exit on socket receive errors.</div>
+<div>    -m method  Method name</div>
+<div>    -h              Display usage information (this message)</div>
+<div>    -Z ciphersuite  Specify SSL/TLS cipher suite (See openssl ciphers)</div>
+<div>    -f protocol     Specify SSL/TLS protocol (SSL3, TLS1, TLS1.1, TLS1.2 or ALL)</div>
+</div>
+<div><br/></div>
+<div><br/></div>
+<div><br/></div>
+</body></html>
