@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/><meta name="exporter-version" content="Evernote Mac 6.11.1 (455061)"/><meta name="altitude" content="24.18350791931152"/><meta name="author" content="W"/><meta name="created" content="2016-04-29 01:25:01 +0000"/><meta name="latitude" content="30.28453149079386"/><meta name="longitude" content="120.1198955679616"/><meta name="source" content="desktop.mac"/><meta name="updated" content="2016-05-04 03:22:06 +0000"/><title>锁的核心原理</title></head><body>
+<div><span style="font-size: 18px;">1: 竞争条件</span></div>
+<div>     首先，看个例子，进程P1，P2共用一个变量COUNT，初始值为0.</div>
+<div>     先说明基本操作: Count++ 操作实际上并不是原子操作, 而分为三步, 将变量值读入内存寄存器 R1, 寄存器值自增1, 将R1再写回主存.</div>
+<table style="-evernote-table:true;border-collapse:collapse;margin-left:0px;table-layout:fixed;width:100%;">
+<tr>
+<td style="border: 1px solid rgb(219, 219, 219); padding: 10px; margin: 0px;width:23.020527859237536%;">
+<div><img src="%E9%94%81%E7%9A%84%E6%A0%B8%E5%BF%83%E5%8E%9F%E7%90%86.resources/A5F891A5-14FF-4CAA-8DEB-6CF685231F55.png" height="135" width="245"/> </div>
+</td>
+<td style="border: 1px solid rgb(219, 219, 219); padding: 10px; margin: 0px;width:76.90615835777126%;">
+<div>顺序执行, </div>
+<div>R1:=Count —&gt; R1++ —&gt; Count:=R1 —&gt; R2:=Count —&gt; R2++ —&gt; Count:=R2   最终 Count = 2</div>
+<div>顺序执行的过程很容易理解, 变量的变化也在期待之中</div>
+</td>
+</tr>
+<tr>
+<td style="border-style:solid;border-width:1px;border-color:rgb(219,219,219);padding:10px;margin:0px;width:50%;">
+<div><img src="%E9%94%81%E7%9A%84%E6%A0%B8%E5%BF%83%E5%8E%9F%E7%90%86.resources/83DBC615-EB5D-4E17-8AEE-E835EA6FCD23.gif" height="135" width="245"/></div>
+</td>
+<td style="border-style:solid;border-width:1px;border-color:rgb(219,219,219);padding:10px;margin:0px;width:50%;">
+<div>在这里, 由于并发执行, 涉及到了线程的切换</div>
+<div><br/></div>
+<div>R1:=Count —&gt; R2:=Count —&gt; R1++ —&gt;  R2++ —&gt; Count:=R1 —&gt; Count:=R2  最终 Count = 1</div>
+<div><br/></div>
+<div>这里相当于 将 R1和 R2都设置成了初始值, 然后分别自增, 再写会主存. 由于设置和自增都是分别进行的, 所以跟期待的值不同. </div>
+</td>
+</tr>
+</table>
+<div><br/></div>
+<div>因为P1，P2两个进程的执行顺序是随机的，可能顺序执行也可能是并发的，由图可见，不同的执行顺序，COUNT的值会不同，这是不允许的。</div>
+<div>像这种情况，及<span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">多个进程并发访问和操作同一数据且执行结果与访问发生的特定顺序有关，称为竞争条件。</span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;"><br/></span></div>
+<div><span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;"><br/></span></div>
+<div><span style="font-size: 18px;">2: 临界区域问题</span></div>
+<div>     为了避免上述情况的发生于是就引入了临界区概念。</div>
+<div>     <span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">有一个代码段称为临界区, 多线程的情况下, 一个进程在临界区内执行，没有其他进程被允许在临界区内执行。</span></div>
+<div>    <span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;"> 临界区问题必须满足三项原则：</span></div>
+<ul>
+<li>Mutual Exclusion 互斥: 不能有两个进程同时在临界区</li>
+<li>Progress 前进: 在临界区外执行的线程不可能阻断其他进程进入临界区</li>
+<li>Bounded Waiting 有限等待: 没有任何线程要在临界区外一直等待</li>
+</ul>
+<div><br/></div>
+<div><span style="font-size: 18px;">3: Peterson算法   </span></div>
+<div>假设有<span style="background-color: rgb(255, 250, 165);-evernote-highlight:true;">两个</span>进程 P0 和 P1, 满足 Peterson 算法的伪代码为:</div>
+<table style="-evernote-table:true;border-collapse:collapse;margin-left:0px;table-layout:fixed;width:100%;">
+<tr>
+<td style="border: 1px solid rgb(219, 219, 219); padding: 10px; margin: 0px;width:33.064516129032256%;">
+<div>假设别名, x 为当前进程号,  y为非当前进程号, 两者取值为0或1(只有两个进程)</div>
+<div><br/></div>
+<div>    int turn = 0; // 初始为1也行</div>
+<div>    boolean have[2] = {false,  false}; //因为只有两个进程</div>
+<div>    do {</div>
+<div>        // Entry Section</div>
+<div>        have[x] = true;</div>
+<div>        turn = y; </div>
+<div>        while ( have[y] &amp;&amp; y==turn ) { /*wait, do nothing*/ };</div>
+<div>        Critical Code</div>
+<div>        have[x] = false;</div>
+<div>
+<div>        // Exit Section</div>
+</div>
+<div><br/></div>
+<div>        Other Code</div>
+<div>    } while(true)</div>
+<div><br/></div>
+</td>
+<td style="border: 1px solid rgb(219, 219, 219); padding: 10px; margin: 0px;width:66.86217008797654%;">
+<div>两个全局共享的状态变量have[0]和have[1]，表示临界区状态及哪个进程正在占用临界区。</div>
+<div><br/></div>
+<div>全局共享变量turn表示不能进入临界区的进程序号。</div>
+<div><br/></div>
+<div>考虑进程P0，一旦它设置have[0]=true，则P1不能进入临界区。</div>
+<div><br/></div>
+<div>如果P1已经进入临界区，那么have[1]=true，P0被阻塞不能进入临界区。</div>
+<div><br/></div>
+<div>另一方面，互相阻塞也避免了。</div>
+<div><br/></div>
+<div>假设P0在while里被阻塞了，表示have[1]为true且turn=1，则此时P1可以执行。</div>
+<div><br/></div>
+<div>典型的顺序</div>
+<div>have[0]=true -&gt; have[1]=true -&gt; turn=0 -&gt; turn=1: 此时 have[1]=true &amp;&amp; 1==turn 则线程1阻塞 -&gt; have[0]=false </div>
+<div>这个时间点上, 线程1一直在执行循环, 一旦have[0]=false设置之后, 线程1的循环等待就被打破了. </div>
+<div>除非 CPU 持续被分配给线程0, 让它执行完 have[0]=true -&gt; turn=1, 然后线程1又进入循环等待</div>
+<div>只要是轮流使用 CPU, 那么就不会出现一直被线程0霸占的情况. </div>
+</td>
+</tr>
+</table>
+<div><br/></div>
+<div><br/></div>
+<div><br/></div>
+</body></html>
